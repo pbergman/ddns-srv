@@ -130,12 +130,11 @@ func (u *UpdateHandler) fetchZones(ctx context.Context, lock WaitableLocker) (ma
 
 		lock.Lock()
 
-		var list = zones[module]
 		var err error
 
 		errList = append(errList, err)
 
-		go u.fetchZonesForModule(ctx, lock, &list, plugin, &err)
+		go u.fetchZonesForModule(ctx, lock, module, &zones, plugin, &err)
 	}
 
 	lock.Wait()
@@ -143,7 +142,7 @@ func (u *UpdateHandler) fetchZones(ctx context.Context, lock WaitableLocker) (ma
 	return zones, errors.Join(errList...)
 }
 
-func (u *UpdateHandler) fetchZonesForModule(ctx context.Context, lock sync.Locker, list *[]string, provider ZoneAwareProvider, ref *error) {
+func (u *UpdateHandler) fetchZonesForModule(ctx context.Context, lock sync.Locker, module string, list *map[string][]string, provider ZoneAwareProvider, ref *error) {
 
 	defer lock.Unlock()
 
@@ -154,10 +153,12 @@ func (u *UpdateHandler) fetchZonesForModule(ctx context.Context, lock sync.Locke
 		return
 	}
 
-	*list = make([]string, len(zones), len(zones))
+	if nil == (*list)[module] {
+		(*list)[module] = make([]string, 0)
+	}
 
-	for idx, zone := range zones {
-		(*list)[idx] = strings.TrimSuffix(zone.Name, ".")
+	for _, zone := range zones {
+		(*list)[module] = append((*list)[module], strings.TrimSuffix(zone.Name, "."))
 	}
 }
 
@@ -195,7 +196,7 @@ hostnames:
 				}
 			}
 
-			u.logger.Debug(fmt.Sprintf("hostname %s is not supported by module %s", hostname, module))
+			u.logger.Debug(fmt.Sprintf("hostname %s is not supported by module %s (%s)", hostname, module, strings.Join(zones[module], ", ")))
 		}
 
 		result.Set(idx, "nohost")
