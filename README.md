@@ -189,7 +189,7 @@ set service dns dynamic interface eth1 service custom-ddns_bridge host-name foo.
 set service dns dynamic interface eth1 service custom-ddns_bridge protocol dyndns2
 set service dns dynamic interface eth1 service custom-ddns_bridge login foo
 set service dns dynamic interface eth1 service custom-ddns_bridge password bar
-set service dns dynamic interface eth4 service custom-ddns_bridge server 10.0.0.101
+set service dns dynamic interface eth1 service custom-ddns_bridge server 10.0.0.101
 commit; save; exit
 ```
 
