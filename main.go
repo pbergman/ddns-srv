@@ -2,14 +2,9 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
 )
 
 func main() {
@@ -21,49 +16,50 @@ func main() {
 		inputOption("provider-debug-level", 2),
 	)
 
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Error(r)
+	switch c := flag.Arg(0); c {
+	case "run":
+		run(logger, level)
+	case "records", "zones", "lookup", "inspect":
+
+		var locker = NewSemaphore(5)
+		var _, providers, err = bootstrap(
+			logger,
+			inputOption("config", ""),
+			level,
+		)
+
+		if err != nil {
+			os.Stderr.WriteString(err.Error() + "\n")
 			os.Exit(1)
 		}
-	}()
 
-	var ctx, stop = signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		switch c {
+		case "records":
+			WriteRecords(context.Background(), providers, locker, os.Stdout, os.Stderr, flag.Args()[1:]...)
+		case "zones":
+			WriteZones(context.Background(), providers, locker, os.Stdout, os.Stderr, flag.Args()[1:]...)
+		case "inspect":
+			WritePlugin(context.Background(), providers, locker, os.Stdout, os.Stderr, flag.Args()[1:]...)
+		default:
 
-	defer stop()
+			if flag.NArg() < 2 || flag.NArg() > 3 {
+				fmt.Fprintf(os.Stderr, "Usage: %s lookup [type] <hostname>\n", os.Args[0])
+				os.Exit(1)
+			}
 
-	var config, providers, err = bootstrap(
-		logger,
-		inputOption("config", ""),
-		level,
-	)
+			var rtype, hostname string
 
-	if err != nil {
-		panic(err)
-	}
+			if flag.NArg() == 2 {
+				rtype = "A"
+				hostname = flag.Arg(1)
+			} else {
+				rtype = flag.Arg(1)
+				hostname = flag.Arg(2)
+			}
 
-	var srv = NewServer(ctx, config, logger, providers)
-
-	go func() {
-		logger.Debug(fmt.Sprintf("listening on %s", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && false == errors.Is(err, http.ErrServerClosed) {
-			logger.Error(err.Error())
+			WriteShort(context.Background(), providers, locker, os.Stdout, os.Stderr, rtype, hostname)
 		}
-	}()
-
-	<-ctx.Done()
-
-	stop()
-
-	shutdown(srv)
-}
-
-func shutdown(srv *http.Server) {
-	var ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
-
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		panic(err)
+	default:
+		flag.Usage()
 	}
 }

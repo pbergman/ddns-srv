@@ -32,12 +32,17 @@ func (t *IPPrefixList) Contains(ip netip.Addr) bool {
 }
 
 type ServerConfig struct {
-	Users          *UserList     `json:"users"`
-	Listen         string        `json:"listen"`
-	TrustedRemotes *IPPrefixList `json:"trusted_remotes"`
+	Users  *UserList `json:"users"`
+	Listen string    `json:"listen"`
+	ServerUpdateConfig
 }
 
-func NewServer(ctx context.Context, config *Config, logger *logger.Logger, plugins map[string]ZoneAwareProvider) *http.Server {
+type ServerUpdateConfig struct {
+	TrustedRemotes *IPPrefixList `json:"trusted_remotes"`
+	NoLocalIp      bool          `json:"no_local_ip"`
+}
+
+func NewServer(ctx context.Context, config *Config, logger *logger.Logger, plugins []PluginProvider) *http.Server {
 	return &http.Server{
 		Addr: config.Server.Listen,
 		Handler: NewServerHandler(

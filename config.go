@@ -6,7 +6,7 @@ import (
 )
 
 type PluginConfig struct {
-	Module string   `json:"module"`
+	Plugin string   `json:"plugin"`
 	Zones  []string `json:"zones,omitempty"`
 }
 
@@ -22,6 +22,10 @@ func ReadConfig(file string) (*Config, error) {
 		PluginDir: "/usr/share/ddns-srv",
 		Server: &ServerConfig{
 			Listen: ":8080",
+
+			ServerUpdateConfig: ServerUpdateConfig{
+				NoLocalIp: false,
+			},
 		},
 	}
 

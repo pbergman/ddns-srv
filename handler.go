@@ -31,8 +31,9 @@ func (r *ResponseWriter) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
-func NewServerHandler(config *ServerConfig, logger *logger.Logger, plugins map[string]ZoneAwareProvider) *ServerHandler {
-	var trusted *IPPrefixList
+func NewServerHandler(config *ServerConfig, logger *logger.Logger, plugins []PluginProvider) *ServerHandler {
+
+	var updateConfig *ServerUpdateConfig
 	var handlers = []Handler{
 		NewIconHandler(),
 	}
@@ -43,17 +44,13 @@ func NewServerHandler(config *ServerConfig, logger *logger.Logger, plugins map[s
 			handlers = append(handlers, NewAuthHandler(config.Users))
 		}
 
-		trusted = config.TrustedRemotes
+		updateConfig = &config.ServerUpdateConfig
 	}
 
-	return &ServerHandler{
-		logger: logger,
-		handlers: append(
-			handlers,
-			NewUpdateHandler(plugins, logger, trusted),
-			NewPrintHandler(plugins, logger),
-		),
-	}
+	handlers = append(handlers, NewUpdateHandler(plugins, logger, updateConfig))
+	handlers = append(handlers, NewPrintHandler(plugins, logger))
+
+	return &ServerHandler{logger: logger, handlers: handlers}
 }
 
 type ServerHandler struct {

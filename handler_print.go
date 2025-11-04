@@ -9,7 +9,7 @@ import (
 	"github.com/pbergman/logger"
 )
 
-func NewPrintHandler(plugins map[string]ZoneAwareProvider, logger *logger.Logger) Handler {
+func NewPrintHandler(plugins []PluginProvider, logger *logger.Logger) Handler {
 	return &PrintHandler{
 		plugins: plugins,
 		logger:  logger,
@@ -17,7 +17,7 @@ func NewPrintHandler(plugins map[string]ZoneAwareProvider, logger *logger.Logger
 }
 
 type PrintHandler struct {
-	plugins map[string]ZoneAwareProvider
+	plugins []PluginProvider
 	logger  *logger.Logger
 }
 
@@ -59,7 +59,7 @@ func (p *PrintHandler) Handle(response http.ResponseWriter, request *http.Reques
 			host = x
 		}
 
-		WriteShort(request.Context(), p.plugins, lock, strings.ToUpper(rtype), host, stdout, stderr)
+		WriteShort(request.Context(), p.plugins, lock, stdout, stderr, strings.ToUpper(rtype), host)
 
 	} else {
 

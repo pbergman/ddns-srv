@@ -17,14 +17,20 @@ import (
 
 type zoneRecords map[string][]*libdns.RR
 
-func WriteRecords(ctx context.Context, plugins map[string]ZoneAwareProvider, lock WaitableLocker, stdout, stderr io.Writer) {
+func WriteRecords(ctx context.Context, plugins []PluginProvider, lock WaitableLocker, stdout, stderr io.Writer, modules ...string) {
 
 	var mapped sync.Map
 	var sizes [4]uint64
 
-	for name, provider := range plugins {
+	for _, provider := range plugins {
+
+		if len(modules) > 0 && false == inSlice(modules, provider.Module().Path) {
+			continue
+		}
+
 		lock.Lock()
-		go fetchRecords(ctx, lock, name, provider, &mapped, &sizes, stderr)
+
+		go fetchRecords(ctx, lock, provider, &mapped, &sizes, stderr)
 	}
 
 	lock.Wait()
@@ -32,14 +38,14 @@ func WriteRecords(ctx context.Context, plugins map[string]ZoneAwareProvider, loc
 	writeRecords(&mapped, sizes, stdout)
 }
 
-func fetchRecords(ctx context.Context, lock sync.Locker, module string, provider ZoneAwareProvider, mapped *sync.Map, sizes *[4]uint64, stderr io.Writer) {
+func fetchRecords(ctx context.Context, lock sync.Locker, provider PluginProvider, mapped *sync.Map, sizes *[4]uint64, stderr io.Writer) {
 
 	defer lock.Unlock()
 
 	zones, err := provider.ListZones(ctx)
 
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "%s: error listing zones: %v\n", module, err)
+		_, _ = fmt.Fprintf(stderr, "%s: error listing zones: %v\n", provider.Module().Path, err)
 		return
 	}
 
@@ -52,7 +58,7 @@ func fetchRecords(ctx context.Context, lock sync.Locker, module string, provider
 		if err != nil {
 
 			if false == errors.Is(err, context.Canceled) {
-				_, _ = fmt.Fprintf(stderr, "%s: error listing records for zone %q: %v\n", module, zone.Name, err)
+				_, _ = fmt.Fprintf(stderr, "%s: error listing records for zone %q: %v\n", provider.Module().Path, zone.Name, err)
 			}
 
 			return
@@ -87,7 +93,7 @@ func fetchRecords(ctx context.Context, lock sync.Locker, module string, provider
 	}
 
 	if len(records) > 0 {
-		mapped.Store(module, records)
+		mapped.Store(provider.Module().Path, records)
 	}
 }
 

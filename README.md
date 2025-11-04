@@ -53,70 +53,94 @@ At the moment we only support `json` config and perhaps this will change but for
 
 
 ```
-
-# The directory where the application looks for provider plugins.
-# 
-# Default: /usr/share/ddns-server
-plugin_dir: 
-
-server: {
-   # The address the HTTP server will bind to for incoming requests.
-   #
-   # Defaults: :8080   
-   listen:
+{
+   # The directory where the application looks for provider plugins.
+   # 
+   # Default: /usr/share/ddns-server
+   plugin_dir: 
    
-   # To enable basic authentication, you can define a hash map where
-   # the username is the key and the password is the value.When empty, 
-   # the application will not validate any incoming requests. 
-   users: {
-      <name>: <password>
+   server: {
+      # The address the HTTP server will bind to for incoming requests.
+      #
+      # Defaults: :8080   
+      listen:
+      
+      
+      # When an update request doesn’t specify an IP address — or the given IP 
+      # cannot be parsed — the system will attempt to automatically determine 
+      # the client’s IP.
+      #
+      # If set to true:
+      #   The system will accept local (private) IPs as valid client IPs.
+      #       
+      # Example:
+      #
+      # Server: 10.0.0.100, Request comes from: 10.0.0.101. The system will 
+      # update the record to 10.0.0.101.
+      # 
+      #      
+      # If set to false:
+      #   The system will only accept public IPs as valid. In that case, if 
+      #   the client’s IP is local (like 10.x.x.x, 172.16.x.x–172.31.x.x, 
+      #   or 192.168.x.x), it will instead look for a public IP, such as the 
+      #   one seen from the external interface or in  X-Forwarded-For header
+      #
+      # Defaults: false  
+      no_local_ip: <bool>
+      
+      
+      # To enable basic authentication, you can define a hash map where
+      # the username is the key and the password is the value.When empty, 
+      # the application will not validate any incoming requests. 
+      users: {
+         <name>: <password>
+      }
+      
+      # When a request doesn’t include an IP or the format is invalid,
+      # the application will use the client’s IP address.
+      #
+      # If ddns-srv is running behind a proxy (like Nginx or Caddy),
+      # it can use the `X-Forwarded-For` headers. To ensure security,
+      # the application validates the remote IP against a list of
+      # trusted networks.
+      #
+      #   trusted_remotes: [
+      #      "127.0.0.1/32"   
+      #   ]
+      #   
+      # This means any requests originating from localhost are trusted,
+      # and the first public IP in the `X-Forwarded-For` chain (from right to left)
+      # will be used as the client’s IP.
+      trusted_remotes: [
+         <ip range>   
+      ]
    }
    
-   # When a request doesn’t include an IP or the format is invalid,
-   # the application will use the client’s IP address.
+   # Eeach plugin entry should include at least the module name. For providers 
+   # that do not support libdns.ZoneLister, you must also define the zones they 
+   # manage. All other fields are passed directly to the provider during 
+   # initialization.
+   # 
+   # So for a provider that does not suport the ZoneLister, but is responsible 
+   # for managing the example.com zone:
+   # 
+   # plugins: [
+   #   {
+   #      "module": "github.com/libdns/example"
+   #      "zones": [
+   #         "example.com"
+   #      ],
+   #      "api_key": "0ab1c2d3"
+   #   }
+   # ]
    #
-   # If ddns-srv is running behind a proxy (like Nginx or Caddy),
-   # it can use the `X-Forwarded-For` headers. To ensure security,
-   # the application validates the remote IP against a list of
-   # trusted networks.
-   #
-   #   trusted_remotes: [
-   #      "127.0.0.1/32"   
-   #   ]
-   #   
-   # This means any requests originating from localhost are trusted,
-   # and the first public IP in the `X-Forwarded-For` chain (from right to left)
-   # will be used as the client’s IP.
-   trusted_remotes: [
-      <ip range>   
+   plugins: [
+      {
+         "module": <name as defined by the PluginModule varable in the pluigin>
+      }
+      ...
    ]
 }
-
-# Eeach plugin entry should include at least the module name. For providers 
-# that do not support libdns.ZoneLister, you must also define the zones they 
-# manage. All other fields are passed directly to the provider during 
-# initialization.
-# 
-# So for a provider that does not suport the ZoneLister, but is responsible 
-# for managing the example.com zone:
-# 
-# plugins: [
-#   {
-#      "module": "github.com/libdns/example"
-#      "zones": [
-#         "example.com"
-#      ],
-#      "api_key": "0ab1c2d3"
-#   }
-# ]
-#
-plugins: [
-   {
-      "module": <name as defined by the PluginModule varable in the pluigin>
-   }
-   ...
-]
-
 ```
 
 ### Creating a Plugin
@@ -161,9 +185,7 @@ Or you can create them manually by following the steps below.
    )
 
    var (
-       Plugin        *example.Provider
-       PluginModule  = "github.com/libdns/example"
-       PluginVersion = "v1.0.0"
+       Plugin *example.Provider
    )
    ```
 

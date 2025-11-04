@@ -2,23 +2,28 @@ package main
 
 import (
 	"context"
+	"runtime/debug"
 
 	"github.com/libdns/libdns"
 )
 
+type PluginProvider interface {
+	ZoneAwareProvider
+	Module() *debug.Module
+}
 type ZoneAwareProvider interface {
-	Provider
+	BaseProvider
 	libdns.ZoneLister
 }
 
-type Provider interface {
+type BaseProvider interface {
 	libdns.RecordSetter
 	libdns.RecordDeleter
 	libdns.RecordGetter
 	libdns.RecordAppender
 }
 
-func NewZoneProvider(inner Provider, zones ...string) ZoneAwareProvider {
+func NewStaticZoneProvider(inner BaseProvider, zones ...string) ZoneAwareProvider {
 	var x = make([]libdns.Zone, len(zones))
 
 	for i, c := 0, len(zones); i < c; i++ {
@@ -26,16 +31,25 @@ func NewZoneProvider(inner Provider, zones ...string) ZoneAwareProvider {
 	}
 
 	return &StaticZoneProvider{
-		Provider: inner,
-		zones:    x,
+		BaseProvider: inner,
+		zones:        x,
 	}
 }
 
 type StaticZoneProvider struct {
-	Provider
+	BaseProvider
 	zones []libdns.Zone
 }
 
 func (z *StaticZoneProvider) ListZones(ctx context.Context) ([]libdns.Zone, error) {
 	return z.zones, nil
+}
+
+type Provider struct {
+	ZoneAwareProvider
+	module *debug.Module
+}
+
+func (p *Provider) Module() *debug.Module {
+	return p.module
 }

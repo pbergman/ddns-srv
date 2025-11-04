@@ -52,19 +52,18 @@ func NewUpdateResult(size int, ip *netip.Addr) *UpdateResult {
 	return update
 }
 
-func NewUpdateHandler(plugins map[string]ZoneAwareProvider, logger *logger.Logger, trusted *IPPrefixList) Handler {
+func NewUpdateHandler(plugins []PluginProvider, logger *logger.Logger, config *ServerUpdateConfig) Handler {
 	return &UpdateHandler{
 		plugins: plugins,
 		logger:  logger,
-		trusted: trusted,
+		config:  config,
 	}
 }
 
 type UpdateHandler struct {
-	plugins map[string]ZoneAwareProvider
+	plugins []PluginProvider
 	logger  *logger.Logger
-	trusted *IPPrefixList
-	locals  *IPPrefixList
+	config  *ServerUpdateConfig
 }
 
 func (u *UpdateHandler) Supports(url *url.URL) bool {
@@ -86,14 +85,14 @@ func (u *UpdateHandler) Handle(response http.ResponseWriter, request *http.Reque
 
 	var ip netip.Addr
 
-	if ip, err = u.getIp(query, request); err != nil {
+	if ip, err = getIp(query, request.RemoteAddr, request.Header, u.config); err != nil {
 		http.Error(response, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	var lock = NewSemaphore(5)
 	var result = NewUpdateResult(len(hosts), &ip)
-	var zones map[string][]string
+	var zones [][]string
 
 	defer result.WriteTo(response)
 
@@ -102,9 +101,9 @@ func (u *UpdateHandler) Handle(response http.ResponseWriter, request *http.Reque
 		return
 	}
 
-	for module, items := range u.makeUpdateLists(hosts, ip, zones, result) {
+	for idx, items := range u.makeUpdateLists(hosts, ip, zones, result) {
 		lock.Lock()
-		go u.updateRecords(request.Context(), hosts, result, items, u.plugins[module], &ip, lock)
+		go u.updateRecords(request.Context(), hosts, result, items, u.plugins[idx], &ip, lock)
 	}
 
 	lock.Wait()
@@ -121,12 +120,12 @@ func (u *UpdateHandler) getHosts(query url.Values) ([]string, error) {
 	return strings.Split(query.Get("hostname"), ","), nil
 }
 
-func (u *UpdateHandler) fetchZones(ctx context.Context, lock WaitableLocker) (map[string][]string, error) {
+func (u *UpdateHandler) fetchZones(ctx context.Context, lock WaitableLocker) ([][]string, error) {
 
-	var zones = make(map[string][]string)
+	var zones = make([][]string, len(u.plugins))
 	var errList = make([]error, 0)
 
-	for module, plugin := range u.plugins {
+	for idx, plugin := range u.plugins {
 
 		lock.Lock()
 
@@ -134,7 +133,7 @@ func (u *UpdateHandler) fetchZones(ctx context.Context, lock WaitableLocker) (ma
 
 		errList = append(errList, err)
 
-		go u.fetchZonesForModule(ctx, lock, module, &zones, plugin, &err)
+		go u.fetchZonesForModule(ctx, lock, idx, &zones, plugin, &err)
 	}
 
 	lock.Wait()
@@ -142,7 +141,7 @@ func (u *UpdateHandler) fetchZones(ctx context.Context, lock WaitableLocker) (ma
 	return zones, errors.Join(errList...)
 }
 
-func (u *UpdateHandler) fetchZonesForModule(ctx context.Context, lock sync.Locker, module string, list *map[string][]string, provider ZoneAwareProvider, ref *error) {
+func (u *UpdateHandler) fetchZonesForModule(ctx context.Context, lock sync.Locker, idx int, list *[][]string, provider ZoneAwareProvider, ref *error) {
 
 	defer lock.Unlock()
 
@@ -153,40 +152,40 @@ func (u *UpdateHandler) fetchZonesForModule(ctx context.Context, lock sync.Locke
 		return
 	}
 
-	if nil == (*list)[module] {
-		(*list)[module] = make([]string, 0)
+	if nil == (*list)[idx] {
+		(*list)[idx] = make([]string, 0)
 	}
 
 	for _, zone := range zones {
-		(*list)[module] = append((*list)[module], strings.TrimSuffix(zone.Name, "."))
+		(*list)[idx] = append((*list)[idx], strings.TrimSuffix(zone.Name, "."))
 	}
 }
 
-func (u *UpdateHandler) makeUpdateLists(hosts []string, ip netip.Addr, zones map[string][]string, result *UpdateResult) map[string]map[string][]libdns.Record {
+func (u *UpdateHandler) makeUpdateLists(hosts []string, ip netip.Addr, zones [][]string, result *UpdateResult) map[int]map[string][]libdns.Record {
 
-	var updates = make(map[string]map[string][]libdns.Record)
+	var updates = make(map[int]map[string][]libdns.Record)
 
 hostnames:
 	for idx, hostname := range hosts {
 
 		u.logger.Debug(fmt.Sprintf("lookup provider for hostname '%s'", hostname))
 
-		for module, _ := range u.plugins {
+		for x, plugin := range u.plugins {
 
-			for _, zone := range zones[module] {
+			for _, zone := range zones[x] {
 				if strings.HasSuffix(hostname, "."+zone) {
 
-					u.logger.Debug(fmt.Sprintf("hostname %s matches zone %s (module %s)", hostname, zone, module))
+					u.logger.Debug(fmt.Sprintf("hostname %s matches zone %s (module %s)", hostname, zone, plugin.Module().Path))
 
-					if _, ok := updates[module]; !ok {
-						updates[module] = make(map[string][]libdns.Record)
+					if _, ok := updates[x]; !ok {
+						updates[x] = make(map[string][]libdns.Record)
 					}
 
-					if _, ok := updates[module][zone]; !ok {
-						updates[module][zone] = make([]libdns.Record, 0)
+					if _, ok := updates[x][zone]; !ok {
+						updates[x][zone] = make([]libdns.Record, 0)
 					}
 
-					updates[module][zone] = append(updates[module][zone], libdns.Address{
+					updates[x][zone] = append(updates[x][zone], libdns.Address{
 						Name: libdns.RelativeName(hostname, zone),
 						TTL:  (time.Minute * 5).Round(time.Second),
 						IP:   ip,
@@ -196,7 +195,7 @@ hostnames:
 				}
 			}
 
-			u.logger.Debug(fmt.Sprintf("hostname %s is not supported by module %s (%s)", hostname, module, strings.Join(zones[module], ", ")))
+			u.logger.Debug(fmt.Sprintf("hostname %s is not supported by module %s (%s)", hostname, plugin.Module().Path, strings.Join(zones[x], ", ")))
 		}
 
 		result.Set(idx, "nohost")
@@ -205,77 +204,7 @@ hostnames:
 	return updates
 }
 
-func (u *UpdateHandler) getIp(query url.Values, request *http.Request) (netip.Addr, error) {
-
-	if query.Has("myip") {
-		if value, err := netip.ParseAddr(query.Get("myip")); err == nil {
-			return value, nil
-		}
-	}
-
-	remote, err := netip.ParseAddrPort(request.RemoteAddr)
-
-	if err != nil {
-		return netip.Addr{}, err
-	}
-
-	if nil == u.trusted || false == u.trusted.Contains(remote.Addr()) {
-		return remote.Addr(), nil
-	}
-
-	var list = u.getAddressesFromList(request.Header.Values("x-forwarded-for"))
-	var local = u.getLocalPrefixList()
-
-	for i := len(list) - 1; i >= 0; i-- {
-		if list[i].IsValid() && false == u.trusted.Contains(list[i]) && false == local.Contains(list[i]) {
-			return list[i], nil
-		}
-	}
-
-	return remote.Addr(), nil
-}
-
-func (u *UpdateHandler) getLocalPrefixList() *IPPrefixList {
-	if nil == u.locals {
-
-		var locals IPPrefixList = make([]netip.Prefix, 3)
-
-		// see https://datatracker.ietf.org/doc/html/rfc1918
-		for idx, x := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
-			if prefix, _ := netip.ParsePrefix(x); prefix.IsValid() {
-				locals[idx] = prefix
-			}
-		}
-
-		u.locals = &locals
-	}
-
-	return u.locals
-}
-
-func (u *UpdateHandler) getAddressesFromList(list []string) []netip.Addr {
-
-	if 0 == len(list) {
-		return nil
-	}
-
-	var items = make([]netip.Addr, 0)
-
-	for i, c := 0, len(list); i < c; i++ {
-
-		var values = strings.Split(list[i], ",")
-
-		for x, y := 0, len(values); x < y; x++ {
-			// ignore error for now and check later with IsValid
-			item, _ := netip.ParseAddr(strings.TrimSpace(values[x]))
-			items = append(items, item)
-		}
-	}
-
-	return items
-}
-
-func (u *UpdateHandler) updateRecords(ctx context.Context, hosts []string, result *UpdateResult, items map[string][]libdns.Record, provider Provider, ip *netip.Addr, lock sync.Locker) {
+func (u *UpdateHandler) updateRecords(ctx context.Context, hosts []string, result *UpdateResult, items map[string][]libdns.Record, provider BaseProvider, ip *netip.Addr, lock sync.Locker) {
 
 	defer lock.Unlock()
 

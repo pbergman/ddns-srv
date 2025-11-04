@@ -1,38 +1,25 @@
 package main
 
 import (
+	"debug/buildinfo"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"plugin"
 	"reflect"
+	"runtime/debug"
 
 	"github.com/pbergman/logger"
 )
 
 type Plugin struct {
-	ref     reflect.Value
-	version string
-	module  string
+	ref   reflect.Value
+	build *debug.Module
 }
 
-func (p *Plugin) New() Provider {
-	return reflect.New(p.ref.Elem().Type().Elem()).Interface().(Provider)
-}
-
-func lookupString(plugin *plugin.Plugin, symbolName string, name string) (string, error) {
-	symbol, err := lookup(plugin, symbolName, name)
-
-	if err != nil {
-		return "", err
-	}
-
-	if value, ok := symbol.(*string); !ok {
-		return "", fmt.Errorf("symbol %s found in plugin %s but is a invalid type: %T", symbolName, filepath.Base(name), symbol)
-	} else {
-		return *value, nil
-	}
+func (p *Plugin) New() BaseProvider {
+	return reflect.New(p.ref.Elem().Type().Elem()).Interface().(BaseProvider)
 }
 
 func lookupProvider(plugin *plugin.Plugin, symbolName string, name string) (*Plugin, error) {
@@ -44,11 +31,11 @@ func lookupProvider(plugin *plugin.Plugin, symbolName string, name string) (*Plu
 
 	var value = reflect.ValueOf(symbol)
 
-	if value.Elem().Type().Implements(reflect.TypeOf((*Provider)(nil)).Elem()) {
+	if value.Elem().Type().Implements(reflect.TypeOf((*BaseProvider)(nil)).Elem()) {
 		return &Plugin{ref: value}, nil
 	}
 
-	return nil, fmt.Errorf("symbol %s found in plugin %s but is not a valid Provider", symbolName, filepath.Base(name))
+	return nil, fmt.Errorf("symbol %s found in plugin %s but is not a valid BaseProvider", symbolName, filepath.Base(name))
 }
 
 func lookup(plugin *plugin.Plugin, symbolName string, name string) (plugin.Symbol, error) {
@@ -76,24 +63,29 @@ func loadPlugin(path string) (*Plugin, error) {
 		return nil, err
 	}
 
-	module, err := lookupString(fd, "PluginModule", path)
+	info, err := buildinfo.ReadFile(path)
 
 	if err != nil {
 		return nil, err
 	}
 
-	provider.module = module
+	var build *debug.Module
+	var pkg = provider.ref.Elem().Type().Elem().PkgPath()
 
-	version, err := lookupString(fd, "PluginVersion", path)
-
-	if err != nil {
-		return nil, err
+	for _, dep := range info.Deps {
+		if dep.Path == pkg {
+			build = dep
+			break
+		}
 	}
 
-	provider.version = version
+	if nil == build {
+		return nil, fmt.Errorf("could not find build info for %s", pkg)
+	}
+
+	provider.build = build
 
 	return provider, nil
-
 }
 
 func isValidElfFile(name string, logger *logger.Logger) bool {
@@ -141,7 +133,7 @@ func isValidElfFile(name string, logger *logger.Logger) bool {
 	return false
 }
 
-func ReadPluginFiles(logger *logger.Logger, root string) (map[string]*Plugin, error) {
+func ReadPluginFiles(logger *logger.Logger, root string) ([]*Plugin, error) {
 
 	matches, err := filepath.Glob(filepath.Join(root, "*.so"))
 
@@ -149,7 +141,7 @@ func ReadPluginFiles(logger *logger.Logger, root string) (map[string]*Plugin, er
 		return nil, err
 	}
 
-	var plugins = make(map[string]*Plugin)
+	var plugins = make([]*Plugin, 0)
 
 	for i, c := 0, len(matches); i < c; i++ {
 		if isValidElfFile(matches[i], logger) {
@@ -160,9 +152,9 @@ func ReadPluginFiles(logger *logger.Logger, root string) (map[string]*Plugin, er
 				continue
 			}
 
-			logger.Debug(fmt.Sprintf("loaded successful plugin %s (%s) from '%s'", x.module, x.version, filepath.Base(matches[i])))
+			logger.Debug(fmt.Sprintf("loaded plugin %s (%s) from '%s'", x.build.Path, x.build.Version, filepath.Base(matches[i])))
 
-			plugins[x.module] = x
+			plugins = append(plugins, x)
 		}
 	}
 

@@ -10,26 +10,26 @@ import (
 	"github.com/libdns/libdns"
 )
 
-func WriteShort(ctx context.Context, plugins map[string]ZoneAwareProvider, lock WaitableLocker, rtype, hostname string, stdout, stderr io.Writer) {
+func WriteShort(ctx context.Context, plugins []PluginProvider, lock WaitableLocker, stdout, stderr io.Writer, rtype, hostname string) {
 
-	for module, provider := range plugins {
+	for _, provider := range plugins {
 
 		lock.Lock()
 
-		go writeShort(ctx, module, provider, lock, rtype, hostname, stdout, stderr)
+		go writeShort(ctx, provider, lock, rtype, hostname, stdout, stderr)
 	}
 
 	lock.Wait()
 }
 
-func writeShort(ctx context.Context, module string, provider ZoneAwareProvider, lock sync.Locker, rtype string, hostname string, stdout, stderr io.Writer) {
+func writeShort(ctx context.Context, provider PluginProvider, lock sync.Locker, rtype string, hostname string, stdout, stderr io.Writer) {
 
 	defer lock.Unlock()
 
 	zones, err := provider.ListZones(ctx)
 
 	if err != nil {
-		_, _ = fmt.Fprintf(stderr, "%s: error listing zones: %v\n", module, err)
+		_, _ = fmt.Fprintf(stderr, "%s: error listing zones: %v\n", provider.Module().Path, err)
 		return
 	}
 
@@ -41,7 +41,7 @@ func writeShort(ctx context.Context, module string, provider ZoneAwareProvider, 
 			items, err := provider.GetRecords(ctx, zone.Name)
 
 			if err != nil {
-				_, _ = fmt.Fprintf(stderr, "%s: error getting records for zone %s: %v\n", module, zone.Name, err)
+				_, _ = fmt.Fprintf(stderr, "%s: error getting records for zone %s: %v\n", provider.Module().Path, zone.Name, err)
 				return
 			}
 
@@ -50,7 +50,7 @@ func writeShort(ctx context.Context, module string, provider ZoneAwareProvider, 
 				var name = strings.TrimSuffix(libdns.AbsoluteName(record.RR().Name, zoneName), ".")
 				var rr = record.RR()
 
-				if name == hostname && rr.Type == rtype {
+				if name == hostname && strings.EqualFold(rr.Type, rtype) {
 					_, _ = stdout.Write([]byte(rr.Data + "\n"))
 				}
 			}
