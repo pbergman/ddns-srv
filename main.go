@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 )
 
 func main() {
@@ -17,6 +18,10 @@ func main() {
 	)
 
 	switch c := flag.Arg(0); c {
+	case "version":
+		if info, ok := debug.ReadBuildInfo(); ok {
+			fmt.Println(info.Main.Version)
+		}
 	case "run":
 		run(logger, level)
 	case "records", "zones", "lookup", "inspect":

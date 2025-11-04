@@ -25,6 +25,7 @@ func init() {
 		fmt.Fprintln(tab, "  records\t[module...]\tprint record")
 		fmt.Fprintln(tab, "  zones\t[module...]\tprint zones")
 		fmt.Fprintln(tab, "  inspect\t[module...]\tprint plugin information")
+		fmt.Fprintln(tab, "  version\t\tprint version of application")
 
 		tab.Flush()
 	}
